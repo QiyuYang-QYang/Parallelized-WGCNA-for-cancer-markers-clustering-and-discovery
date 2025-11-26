@@ -24,9 +24,13 @@ const (
 
 	// delete genes of low variance percentile
 	lowVariancePercentile = 0.25
+
+	//soft threshold: beta
+	softPowerBeta = 6.0
 )
 
 func main() {
+	//PHASE2: Preprocessing the data (parsing & filtering)
 	log.Println("Phase 1: Preprocessing the data (parsing & filtering)")
 	// step 1: parsing GTF annotations (we need gene length for TPM)
 	log.Println("Parsing GTF annotation...")
@@ -56,15 +60,67 @@ func main() {
 	}
 
 	
+	log.Println("Phase 2: Correlation matrix & Adjacency matrix")
+	// PHASE2: Pearsons matrix; Correlation matrix
 	// Step 3: Write the matrix for following analyzing.
-	
 	log.Println("Generating the matrix:", outputMatrixFile)
 	err = writeOutputCSV(outputMatrixFile, finalMatrix, finalGeneList, finalSampleList)
 	if err != nil {
 		log.Fatalf("Failed in writing the matrix: %v", err)
 	}
 
+	
+	log.Printf("  (P2) uses a %d gene x %d sample matrix", len(finalGeneList), len(finalSampleList))
+	correlationMatrix, err := RunPhase2(finalMatrix, finalGeneList)
+	if err != nil {
+		log.Fatalf("failed to run phase 2: %v", err)
+	}
+
+	err = writeCorrelationMatrix("correlation_matrix.csv", correlationMatrix, finalGeneList)
+	if err != nil {
+		// Log a warning if saving fails, but don't stop the program
+		log.Printf("warning: failed to save correlation matrix: %v", err)
+	}
+	// PHASE 3: 构建邻接矩阵 (Adjacency Matrix)
+	log.Println("Phase 3: Calculating Adjacency Matrix...")
+    log.Printf(" -> Applying Soft Thresholding with Beta = %.1f", softPowerBeta)
+
+	adjacencyMatrix := CalculateAdjacencyMatrix(correlationMatrix, softPowerBeta)
+	log.Printf(" -> Adjacency Matrix created. Size: %d x %d", len(adjacencyMatrix), len(adjacencyMatrix))
+	//save the adjacency matrix
+	log.Println("Saving Adjacency Matrix to CSV...")
+    err = writeCorrelationMatrix("adjacency_matrix.csv", adjacencyMatrix, finalGeneList) 
+    if err != nil {
+        log.Printf("warning: failed to save adjacency matrix: %v", err)
+    }
+	// PHASE 4: Topological Overlap Matrix (TOM)
+	log.Println("Phase 4: Calculating Topological Overlap Matrix (TOM)...")
+	tomMatrix := CalculateTOM(adjacencyMatrix)
+	log.Printf(" -> TOM created. Size: %d x %d", len(tomMatrix), len(tomMatrix))
+	log.Println("Saving TOM Matrix to CSV (This might be large)...")
+    err = writeCorrelationMatrix("tom_matrix.csv", tomMatrix, finalGeneList)
+    if err != nil {
+        log.Printf("warning: failed to save TOM matrix: %v", err)
+    }
+
+	// PHASE 5: Prepare for Clustering (Dissimilarity)
+    // ---------------------------------------------------------
+    log.Println("Phase 5: Calculating Dissimilarity Matrix (1 - TOM)...")
+    
+    // 转换
+    distMatrix := CalculateDissimilarity(tomMatrix)
+    
+    // 保存
+    // 这个文件就是 Python 的输入
+    log.Println("Saving Dissimilarity Matrix for Python clustering...")
+    err = writeOutputCSV("dissimilarity_matrix.csv", distMatrix, finalGeneList, finalGeneList) // 注意这里行列名都是 geneList
+    if err != nil {
+        log.Fatalf("Failed to save dissimilarity matrix: %v", err)
+    }
+    
+    log.Println("DONE! Go pipeline finished. Now run the Python script for clustering.")
 }
+
 
 // writeOutputCSV takes in filepath, processed matrix, genelist, samplelist input
 // It saves the matrix in local environment.
@@ -99,3 +155,5 @@ func writeOutputCSV(filePath string, matrix [][]float64, geneList []string, samp
 	}
 	return nil
 }
+
+
