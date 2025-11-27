@@ -54,6 +54,10 @@ Comprehensive gene annotation	CHR（基因长度注释）
     * **c. 产出:** `main.go` 调用 `writeCorrelationMatrix` 函数，将这个 `16746 x 16746` 的异质性矩阵保存为 `dissimilarity_matrix.csv`，作为最终输出供 RShiny 可视化工具进行基因模块聚类分析。
 
 
+
 thyroid matrix:
 https://drive.google.com/file/d/15FEyBlubkOzGZNARPno2PqadztDV3ztq/view?usp=drive_link
 correlation matrix (Based on Pearsons):
+
+Updated 11.26：
+基于https://link.springer.com/article/10.1186/s40001-025-02466-x#Fig1这篇文章，我修改了数据来源。现在我们是从TCGA-THCA dataset里手动选择了cancer的样本，然后自己形成一个
