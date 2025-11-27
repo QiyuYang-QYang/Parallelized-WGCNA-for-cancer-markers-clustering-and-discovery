@@ -7,11 +7,13 @@ import (
 // CalculateAdjacencyMatrix constructs a *signed* adjacency matrix
 // from a Pearson correlation matrix using soft-thresholding power beta.
 //
-// Signed network：先把相关系数从 [-1,1] 映射到 [0,1]:
+// Signed network:
+// First, map the correlation coefficients from [-1, 1] to [0, 1]:
 //   s_ij = (corr_ij + 1) / 2
-// 再做 a_ij = s_ij^beta
+// Then apply the power operation: a_ij = s_ij^beta
 //
-// 对角线设为 0（WGCNA 里 adjacency 通常 diag=0，后面 TOM 会把 diag 设成 1）。
+// Set the diagonal to 0 (in WGCNA, the adjacency matrix typically has diag=0,
+// while the TOM calculation will later set diag to 1).
 func CalculateAdjacencyMatrix(corrMatrix [][]float64, beta float64) [][]float64 {
 	numGenes := len(corrMatrix)
 
@@ -23,14 +25,14 @@ func CalculateAdjacencyMatrix(corrMatrix [][]float64, beta float64) [][]float64 
 	for i := 0; i < numGenes; i++ {
 		for j := i; j < numGenes; j++ {
 			if i == j {
-				// 自连边在 adjacency 里设 0，TOM 里再处理成 1
+				// later will further adjust in TOM analysis
 				adjMatrix[i][j] = 0.0
 				continue
 			}
 
 			corr := corrMatrix[i][j] // ∈ [-1, 1]
 
-			// 映射到 signed 权重：[-1,1] → [0,1]
+			// signed weight：[-1,1] → [0,1]
 			s := (corr + 1.0) / 2.0
 			if s < 0 {
 				s = 0
