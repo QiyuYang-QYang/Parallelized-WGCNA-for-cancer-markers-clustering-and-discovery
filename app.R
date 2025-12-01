@@ -243,6 +243,7 @@ server <- function(input, output, session) {
         vals$gene_names <- common_genes
         
         addLog(sprintf("Matched Expression Matrix: %d samples, %d genes", nrow(vals$expr), ncol(vals$expr)))
+        addLog(paste("Example gene names:", paste(head(vals$gene_names), collapse=", ")))
         vals$dataLoaded <- TRUE
       } else {
         addLog("ERROR: clean_thyroid_matrix.csv not found.")
@@ -322,6 +323,12 @@ server <- function(input, output, session) {
       vals$mergedMods <- merge$colors
       vals$MEs <- merge$newMEs
       
+      updateSelectInput(session, "hubModule",
+                        choices = unique(vals$mergedMods))
+      
+      updateSelectInput(session, "enrichModule",
+                        choices = unique(vals$mergedMods))
+      
       addLog(sprintf("Merged Modules: %d final modules",
                      length(unique(vals$mergedMods))))
       
@@ -346,20 +353,20 @@ server <- function(input, output, session) {
       # Prepare Hub Genes table
       gene_colors <- vals$mergedMods
       hubs <- data.frame(GeneID = colnames(vals$expr), Module = gene_colors)
-      
-      # Attach kME for the assigned module
-      kme_values <- c()
-      for(i in 1:nrow(hubs)) {
+
+      kme_values <- sapply(1:nrow(hubs), function(i) {
         mod <- hubs$Module[i]
         colname <- paste0("kME", mod)
         if(colname %in% colnames(vals$datKME)) {
-          kme_values[i] <- vals$datKME[i, colname]
+          vals$datKME[hubs$GeneID[i], colname]
         } else {
-          kme_values[i] <- NA # Grey module usually
+          NA
         }
-      }
-      hubs$kME <- kme_values
-      vals$hub_genes <- hubs
+      })
+
+hubs$kME <- kme_values
+vals$hub_genes <- hubs
+
       
       vals$analysisComplete <- TRUE
       addLog("kME Calculation Done.")
@@ -461,54 +468,75 @@ server <- function(input, output, session) {
     # Filter by selected module
     sub_df <- vals$hub_genes %>% 
       filter(Module == input$hubModule) %>%
+      # 确保 hub genes 是按 kME 降序排列的
       arrange(desc(kME)) %>%
       head(input$topN)
     
+    # 修复：移除 renderDT 内部的 options/selection 参数，让其仅返回 datatable 对象
     datatable(sub_df, options = list(pageLength = 10)) %>%
       formatRound(columns=c("kME"), digits=4)
-  })
+  }, selection = 'single')
   
   # --- 7. Enrichment DT (Dynamic Calc) ---
   output$enrichTable <- renderDT({
-    req(vals$enrichmentComplete, input$enrichModule)
+    # 确保 analysisComplete, enrichmentComplete, 和 input$enrichModule 已经被设置
+    req(vals$analysisComplete, vals$enrichmentComplete, input$enrichModule)
     
-    # Get genes in module
-    mod_genes <- vals$gene_names[vals$mergedMods == input$enrichModule]
-    
-    withProgress(message = 'Running Enrichment...', {
+    # 将整个计算过程包裹在 suppressWarnings 中，消除 bitr 和 enricher 产生的警告
+    suppressWarnings({
       
-      # Assuming GeneIDs are SYMBOLS. Convert to ENTREZID.
-      # Modify 'keyType' if your input genes are ENSEMBL or other.
-      gene_entrez <- bitr(mod_genes, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+      mod_genes <- vals$gene_names[vals$mergedMods == input$enrichModule]
+      mod_genes_clean <- sub("\\..*$", "", mod_genes)
       
-      if(nrow(gene_entrez) == 0) return(NULL)
+      # 1. 基因 ID 映射
+      gene_entrez <- tryCatch({
+        bitr(mod_genes_clean,
+             fromType = "ENSEMBL",
+             toType = "ENTREZID",
+             OrgDb = org.Hs.eg.db)
+      }, error = function(e){
+        addLog(paste("bitr error:", e$message))
+        return(NULL)
+      })
       
+      if (is.null(gene_entrez) || nrow(gene_entrez) == 0) {
+        addLog("No genes mapped to ENTREZ.")
+        return(data.frame(Result = "No genes mapped to ENTREZ."))
+      }
+      
+      # 2. 运行富集分析
       res_df <- NULL
       
-      if(input$enrichType == "go") {
-        ego <- enrichGO(gene = gene_entrez$ENTREZID,
-                        OrgDb = org.Hs.eg.db,
-                        ont = "BP", # Biological Process
-                        pAdjustMethod = "BH",
-                        pvalueCutoff = 0.05,
-                        qvalueCutoff = 0.2,
-                        readable = TRUE)
-        if(!is.null(ego)) res_df <- as.data.frame(ego)
+      if (input$enrichType == "go") {
+        ego <- enrichGO(
+          gene = gene_entrez$ENTREZID,
+          OrgDb = org.Hs.eg.db,
+          ont = "BP",
+          pAdjustMethod = "BH",
+          pvalueCutoff = 0.05,
+          qvalueCutoff = 0.2,
+          readable = TRUE
+        )
+        if (!is.null(ego) && nrow(ego@result) > 0) res_df <- as.data.frame(ego)
       } else {
-        ekegg <- enrichKEGG(gene = gene_entrez$ENTREZID,
-                            organism = 'hsa',
-                            pvalueCutoff = 0.05)
-        if(!is.null(ekegg)) res_df <- as.data.frame(ekegg)
+        ekegg <- enrichKEGG(
+          gene = gene_entrez$ENTREZID,
+          organism = 'hsa',
+          pvalueCutoff = 0.05
+        )
+        if (!is.null(ekegg) && nrow(ekegg@result) > 0) res_df <- as.data.frame(ekegg)
       }
       
-      if(is.null(res_df) || nrow(res_df) == 0) {
-        return(data.frame(Result = "No significant enrichment found."))
+      if (is.null(res_df) || nrow(res_df) == 0) {
+        return(data.frame(Result = paste(toupper(input$enrichType), "returned no significant terms.")))
       }
       
-      # Return simple table
-      res_df[, c("ID", "Description", "p.adjust", "geneID")]
-    })
+      # 3. 返回表格
+      datatable(res_df[, c("ID", "Description", "p.adjust", "geneID")], options = list(pageLength = 10)) %>%
+        formatRound(columns="p.adjust", digits=5)
+    }) # 关闭 suppressWarnings
   }, selection = 'single')
+  
   
   # ==============================================================================
   # Downloads
