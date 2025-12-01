@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"math"
 )
 
 const (
@@ -109,7 +110,13 @@ func main() {
     // ---------------------------------------------------------
     log.Println("Phase 5: Calculating Dissimilarity (1-TOM)...")
 	distMatrix := CalculateDissimilarity(tomMatrix)
-	
+
+	for i := range distMatrix {
+		for j := range distMatrix[i] {
+			distMatrix[i][j] = math.Sqrt(distMatrix[i][j])
+		}
+	}
+		
 	// save Dissimilarity matrix for RShiny visualization.
 	finalFile := "dissimilarity_matrix.csv"
 	log.Println("Saving Dissimilarity Matrix for clustering...")
