@@ -208,5 +208,8 @@ Visualization:
 
 ## How to Reproduce
 
+- download gtf data (gencode.v36.annotation.gtf) zip file in work directory
+- download gct data (gene_reads_v10_thyroid.gct) zip file in work directory
+
 ```bash
 go run main.go
